@@ -97,7 +97,11 @@ class AlyaPay extends PaymentModule
             'ALYAPAY_PRODUCT_WIDGET_MARGIN_Y' => '',
             'ALYAPAY_PRODUCT_WIDGET_PADDING_X' => '',
             'ALYAPAY_PRODUCT_WIDGET_PADDING_Y' => '',
+            'ALYAPAY_SHOW_DISABLED_BELOW_MIN' => '0',
+            'ALYAPAY_DISABLED_TITLE' => '',
             'ALYAPAY_WIDGET_CART_ENABLED' => '0',
+            'ALYAPAY_CART_WIDGET_SHOW_BELOW_MIN' => '0',
+            'ALYAPAY_CART_WIDGET_MIN_DISPLAY' => 'rich',
             'ALYAPAY_CART_WIDGET_THEME' => 'light',
             'ALYAPAY_CART_WIDGET_VARIANT' => 'default',
             'ALYAPAY_CART_WIDGET_DETAIL' => 'modal',
@@ -132,9 +136,44 @@ class AlyaPay extends PaymentModule
 
         if (Tools::isSubmit('submitAlyaPayConfig')) {
             $output .= $this->postProcess();
+        } else {
+            $this->fetchAndSyncPartnerConfig();
         }
 
         return $output . $this->renderForm();
+    }
+
+    private function fetchAndSyncPartnerConfig(): void
+    {
+        $config = new AlyaPayConfig();
+        if (!$config->getApiKey()) {
+            return;
+        }
+
+        try {
+            $service  = new AlyaPayPartnerConfigService(new AlyaPayApiClient($config), $config);
+            $response = $service->getConfig();
+
+            if (isset($response['minAmount'])) {
+                Configuration::updateValue('ALYAPAY_AMOUNT_MIN', (string) $response['minAmount']);
+            }
+            if (isset($response['maxAmount'])) {
+                Configuration::updateValue('ALYAPAY_AMOUNT_MAX', (string) $response['maxAmount']);
+            }
+            if (array_key_exists('transactionExpiry', $response)) {
+                Configuration::updateValue(
+                    'ALYAPAY_TRANSACTION_EXPIRY',
+                    $response['transactionExpiry'] !== null ? (string) $response['transactionExpiry'] : '30'
+                );
+            }
+        } catch (\Throwable $e) {
+            PrestaShopLogger::addLog(
+                'AlyaPay: failed to sync remote config: ' . $e->getMessage(),
+                2,
+                null,
+                'AlyaPay'
+            );
+        }
     }
 
     private function postProcess(): string
@@ -156,6 +195,8 @@ class AlyaPay extends PaymentModule
         if ($syncWarning) {
             $output .= $this->displayWarning($syncWarning);
         }
+
+        $this->fetchAndSyncPartnerConfig();
 
         return $output;
     }
@@ -226,6 +267,8 @@ class AlyaPay extends PaymentModule
             'ALYAPAY_STATUS_CANCELED' => ['type' => 'select_order_state', 'label' => $this->l('Status for Canceled')],
             'ALYAPAY_STATUS_EXPIRED' => ['type' => 'select_order_state', 'label' => $this->l('Status for Expired')],
             'ALYAPAY_WIDGET_CHECKOUT_ENABLED' => ['type' => 'switch', 'label' => $this->l('Enable Checkout Widget')],
+            'ALYAPAY_SHOW_DISABLED_BELOW_MIN' => ['type' => 'switch', 'label' => $this->l('Show as Disabled Below Minimum')],
+            'ALYAPAY_DISABLED_TITLE' => ['type' => 'text', 'label' => $this->l('Disabled State Title')],
             'ALYAPAY_WIDGET_CURRENCY' => ['type' => 'text', 'label' => $this->l('Widget Currency')],
             'ALYAPAY_WIDGET_THEME' => ['type' => 'select_theme', 'label' => $this->l('Widget Theme')],
             'ALYAPAY_WIDGET_VARIANT' => ['type' => 'select_variant', 'label' => $this->l('Widget Variant')],
@@ -247,6 +290,8 @@ class AlyaPay extends PaymentModule
             'ALYAPAY_PRODUCT_WIDGET_PADDING_X' => ['type' => 'text', 'label' => $this->l('Padding X (px)')],
             'ALYAPAY_PRODUCT_WIDGET_PADDING_Y' => ['type' => 'text', 'label' => $this->l('Padding Y (px)')],
             'ALYAPAY_WIDGET_CART_ENABLED' => ['type' => 'switch', 'label' => $this->l('Enable Credit Promo on Cart')],
+            'ALYAPAY_CART_WIDGET_SHOW_BELOW_MIN' => ['type' => 'switch', 'label' => $this->l('Show Below Minimum Indicator')],
+            'ALYAPAY_CART_WIDGET_MIN_DISPLAY' => ['type' => 'select', 'label' => $this->l('Below Minimum Display')],
             'ALYAPAY_CART_WIDGET_THEME' => ['type' => 'select_theme', 'label' => $this->l('Cart Widget Theme')],
             'ALYAPAY_CART_WIDGET_VARIANT' => ['type' => 'select_variant', 'label' => $this->l('Cart Widget Variant')],
             'ALYAPAY_CART_WIDGET_DETAIL' => ['type' => 'select_detail', 'label' => $this->l('Cart Widget Detail')],
@@ -372,6 +417,8 @@ class AlyaPay extends PaymentModule
                     'legend' => ['title' => $this->l('Checkout Widget'), 'icon' => 'icon-shopping-cart'],
                     'input' => [
                         ['type' => 'switch', 'label' => $this->l('Enable Checkout Widget'), 'name' => 'ALYAPAY_WIDGET_CHECKOUT_ENABLED', 'values' => $switchValues],
+                        ['type' => 'switch', 'label' => $this->l('Show as Disabled Below Minimum'), 'name' => 'ALYAPAY_SHOW_DISABLED_BELOW_MIN', 'values' => $switchValues, 'desc' => $this->l('Display AlyaPay as a disabled, unselectable option when cart total is below the minimum amount.')],
+                        ['type' => 'text', 'label' => $this->l('Disabled State Title'), 'name' => 'ALYAPAY_DISABLED_TITLE', 'size' => 40, 'desc' => $this->l('Title shown when the option is disabled. Falls back to the main title if empty.')],
                         ['type' => 'text', 'label' => $this->l('Widget Currency'), 'name' => 'ALYAPAY_WIDGET_CURRENCY', 'size' => 10, 'desc' => $this->l('e.g. MAD, Dhs. Leave empty for store currency.')],
                         ['type' => 'select', 'label' => $this->l('Theme'), 'name' => 'ALYAPAY_WIDGET_THEME', 'options' => ['query' => $themeOptions, 'id' => 'id_option', 'name' => 'name']],
                         ['type' => 'select', 'label' => $this->l('Variant'), 'name' => 'ALYAPAY_WIDGET_VARIANT', 'options' => ['query' => $variantOptions, 'id' => 'id_option', 'name' => 'name']],
@@ -409,6 +456,8 @@ class AlyaPay extends PaymentModule
                     'legend' => ['title' => $this->l('Cart Widget'), 'icon' => 'icon-shopping-bag'],
                     'input' => [
                         ['type' => 'switch', 'label' => $this->l('Enable Credit Promo on Cart'), 'name' => 'ALYAPAY_WIDGET_CART_ENABLED', 'values' => $switchValues],
+                        ['type' => 'switch', 'label' => $this->l('Show Below Minimum Indicator'), 'name' => 'ALYAPAY_CART_WIDGET_SHOW_BELOW_MIN', 'values' => $switchValues, 'desc' => $this->l('Show remaining amount needed to unlock AlyaPay when cart total is below minimum.')],
+                        ['type' => 'select', 'label' => $this->l('Below Minimum Display'), 'name' => 'ALYAPAY_CART_WIDGET_MIN_DISPLAY', 'options' => ['query' => [['id_option' => 'rich', 'name' => $this->l('Rich (banner + progress bar)')], ['id_option' => 'minimal', 'name' => $this->l('Minimal (banner only)')]], 'id' => 'id_option', 'name' => 'name']],
                         ['type' => 'select', 'label' => $this->l('Theme'), 'name' => 'ALYAPAY_CART_WIDGET_THEME', 'options' => ['query' => $themeOptions, 'id' => 'id_option', 'name' => 'name']],
                         ['type' => 'select', 'label' => $this->l('Variant'), 'name' => 'ALYAPAY_CART_WIDGET_VARIANT', 'options' => ['query' => $variantOptions, 'id' => 'id_option', 'name' => 'name']],
                         ['type' => 'select', 'label' => $this->l('Detail'), 'name' => 'ALYAPAY_CART_WIDGET_DETAIL', 'options' => ['query' => $detailOptions, 'id' => 'id_option', 'name' => 'name']],
@@ -455,14 +504,38 @@ class AlyaPay extends PaymentModule
 
         $cart = $params['cart'];
         $total = (float) $cart->getOrderTotal();
-        if (!$config->isAmountInRange($total)) {
+
+        if ($config->isAmountAboveMax($total)) {
             return [];
+        }
+
+        $isBelowMin    = $config->isAmountBelowMin($total);
+        $showDisabled  = $config->isShowDisabledBelowMin();
+
+        if ($isBelowMin && !$showDisabled) {
+            return [];
+        }
+
+        $title = Configuration::get('ALYAPAY_TITLE') ?: $this->l('Pay with AlyaPay');
+        if ($isBelowMin) {
+            $disabledTitle = trim((string) $config->getDisabledTitle());
+            if ($disabledTitle !== '') {
+                $title = $disabledTitle;
+            }
         }
 
         $option = new \PrestaShop\PrestaShop\Core\Payment\PaymentOption();
         $option->setModuleName($this->name)
-            ->setCallToActionText(Configuration::get('ALYAPAY_TITLE') ?: $this->l('Pay with AlyaPay'))
+            ->setCallToActionText($title)
             ->setAction($this->context->link->getModuleLink($this->name, 'redirect', [], true));
+
+        if ($isBelowMin) {
+            $this->context->smarty->assign(['alyapay_module_name' => $this->name]);
+            $option->setAdditionalInformation(
+                $this->context->smarty->fetch('module:alyapay/views/templates/front/payment_disabled.tpl')
+            );
+            return [$option];
+        }
 
         if ($config->isWidgetEnabled()) {
             $this->context->smarty->assign([
@@ -689,7 +762,7 @@ class AlyaPay extends PaymentModule
         }
 
         $price = (float) ($product->price_amount ?? $product->price ?? 0);
-        if ($price <= 0 || !$config->isAmountInRange($price)) {
+        if ($price <= 0 || $config->isAmountAboveMax($price)) {
             return '';
         }
 
@@ -730,9 +803,20 @@ class AlyaPay extends PaymentModule
         }
 
         $total = (float) $cart->getOrderTotal();
-        if (!$config->isAmountInRange($total)) {
+
+        if ($config->isAmountAboveMax($total)) {
             return '';
         }
+
+        $isBelowMin     = $config->isAmountBelowMin($total);
+        $showBelowMin   = $config->isCartWidgetShowBelowMin();
+
+        if ($isBelowMin && !$showBelowMin) {
+            return '';
+        }
+
+        $minAmount  = $isBelowMin && $showBelowMin ? number_format($config->getAmountMin(), 2, '.', '') : '';
+        $minDisplay = $isBelowMin && $showBelowMin ? $config->getCartWidgetMinDisplay() : '';
 
         $this->context->smarty->assign([
             'alyapay_price' => number_format($total, 2, '.', ''),
@@ -747,6 +831,8 @@ class AlyaPay extends PaymentModule
             'alyapay_margin_y' => $config->getCartWidgetMarginY(),
             'alyapay_padding_x' => $config->getCartWidgetPaddingX(),
             'alyapay_padding_y' => $config->getCartWidgetPaddingY(),
+            'alyapay_min_amount' => $minAmount,
+            'alyapay_min_display' => $minDisplay,
         ]);
 
         return $this->context->smarty->fetch('module:alyapay/views/templates/front/cart_promo.tpl');

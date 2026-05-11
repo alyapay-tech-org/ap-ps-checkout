@@ -20,6 +20,11 @@ class AlyaPayPartnerConfigService
         $this->config = $config;
     }
 
+    public function getConfig(): array
+    {
+        return $this->client->getWithApiKey(self::API_PATH);
+    }
+
     public function updateConfig(array $data): array
     {
         return $this->client->putWithApiKey(self::API_PATH, $data);

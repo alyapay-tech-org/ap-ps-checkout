@@ -16,6 +16,29 @@ $orderStates = [
     ],
 ];
 
+// Register module for all active currencies across all shops
+$id_module = (int) Module::getModuleIdByName('alyapay');
+if ($id_module > 0) {
+    foreach (Shop::getShops(true, null, true) as $id_shop) {
+        foreach (Currency::getCurrencies(false, true) as $currency) {
+            $id_currency = (int) $currency['id_currency'];
+            $exists = (int) Db::getInstance()->getValue(
+                'SELECT COUNT(*) FROM `' . _DB_PREFIX_ . 'module_currency`
+                WHERE `id_module` = ' . $id_module . '
+                AND `id_shop` = ' . (int) $id_shop . '
+                AND `id_currency` = ' . $id_currency
+            );
+            if (!$exists) {
+                Db::getInstance()->insert('module_currency', [
+                    'id_module'   => $id_module,
+                    'id_shop'     => (int) $id_shop,
+                    'id_currency' => $id_currency,
+                ]);
+            }
+        }
+    }
+}
+
 foreach ($orderStates as $configKey => $definition) {
     $existingId = (int) Configuration::get($configKey);
     if ($existingId > 0) {

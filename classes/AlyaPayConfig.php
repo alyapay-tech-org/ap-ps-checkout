@@ -105,6 +105,27 @@ class AlyaPayConfig
         return $value ? (int) $value : (int) Configuration::get('PS_OS_CHEQUE');
     }
 
+    public function isShowDisabledBelowMin(): bool
+    {
+        return (bool) Configuration::get('ALYAPAY_SHOW_DISABLED_BELOW_MIN');
+    }
+
+    public function getDisabledTitle(): string
+    {
+        $value = Configuration::get('ALYAPAY_DISABLED_TITLE');
+        return $value !== false ? (string) $value : '';
+    }
+
+    public function isAmountBelowMin(float $amount): bool
+    {
+        return $amount < $this->getAmountMin();
+    }
+
+    public function isAmountAboveMax(float $amount): bool
+    {
+        return $amount > $this->getAmountMax();
+    }
+
     // ─── Checkout widget ───────────────────────────────────────────────
 
     public function isWidgetEnabled(): bool
@@ -211,6 +232,16 @@ class AlyaPayConfig
 
 
     // ─── Cart widget ───────────────────────────────────────────────────
+
+    public function isCartWidgetShowBelowMin(): bool
+    {
+        return (bool) Configuration::get('ALYAPAY_CART_WIDGET_SHOW_BELOW_MIN');
+    }
+
+    public function getCartWidgetMinDisplay(): string
+    {
+        return (string) (Configuration::get('ALYAPAY_CART_WIDGET_MIN_DISPLAY') ?: 'rich');
+    }
 
     public function isCreditPromoCartEnabled(): bool
     {
