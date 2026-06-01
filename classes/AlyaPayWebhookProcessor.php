@@ -80,6 +80,22 @@ class AlyaPayWebhookProcessor
                     return true;
                 }
 
+                // Customer switched payment method — webhook belongs to abandoned AlyaPay attempt, ignore it.
+                if ($order->module !== 'alyapay') {
+                    PrestaShopLogger::addLog(
+                        sprintf(
+                            'AlyaPay webhook: ignoring %s for order %s — payment method changed to %s',
+                            $event,
+                            $order->reference,
+                            $order->module
+                        ),
+                        1,
+                        null,
+                        'AlyaPay'
+                    );
+                    return true;
+                }
+
                 if ($event === self::EVENT_EXPIRED) {
                     $targetStatus = $this->config->getExpiredStatus();
                 } else {
