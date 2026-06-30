@@ -29,6 +29,79 @@ class AlyaPayOrderHelper
         return Validate::isLoadedObject($order) ? $order : null;
     }
 
+    /**
+     * Returns all orders for a given cart ID — covers multivendor split-order setups.
+     *
+     * @return Order[]
+     */
+    public function getOrdersByCartId(int $cartId): array
+    {
+        if ($cartId <= 0) {
+            return [];
+        }
+
+        $orders = $this->loadOrdersByCartId($cartId);
+        if (!empty($orders)) {
+            return $orders;
+        }
+
+        // Fallback: multivendor split module stores sub-carts in ps_presta_split_order.
+        // id_original_cart = original session cart; each row has its own id_cart (sub-cart).
+        $splitTableExists = (bool) Db::getInstance()->getValue(
+            "SELECT COUNT(*) FROM information_schema.tables
+             WHERE table_schema = DATABASE()
+             AND table_name = '" . pSQL(_DB_PREFIX_ . 'presta_split_order') . "'"
+        );
+        if (!$splitTableExists) {
+            return [];
+        }
+
+        $subCartRows = Db::getInstance()->executeS(
+            'SELECT id_cart FROM `' . _DB_PREFIX_ . 'presta_split_order`
+             WHERE id_original_cart = ' . (int) $cartId
+        );
+        if (!$subCartRows) {
+            return [];
+        }
+
+        foreach ($subCartRows as $row) {
+            $subCartId = (int) $row['id_cart'];
+            if ($subCartId <= 0) {
+                continue;
+            }
+            $subOrders = $this->loadOrdersByCartId($subCartId);
+            foreach ($subOrders as $order) {
+                $orders[] = $order;
+            }
+        }
+
+        return $orders;
+    }
+
+    private function loadOrdersByCartId(int $cartId): array
+    {
+        $sql = new DbQuery();
+        $sql->select('id_order');
+        $sql->from('orders');
+        $sql->where('id_cart = ' . (int) $cartId);
+        $sql->orderBy('id_order ASC');
+
+        $rows = Db::getInstance()->executeS($sql);
+        if (!$rows) {
+            return [];
+        }
+
+        $orders = [];
+        foreach ($rows as $row) {
+            $order = new Order((int) $row['id_order']);
+            if (Validate::isLoadedObject($order)) {
+                $orders[] = $order;
+            }
+        }
+
+        return $orders;
+    }
+
     public function approveOrder(Order $order, string $transactionId, int $targetStateId): bool
     {
         if (!Validate::isLoadedObject($order)) {
@@ -75,10 +148,25 @@ class AlyaPayOrderHelper
             return true;
         }
 
+        // Webhook runs without frontend context — addWithemail needs currency/locale precision.
+        // Inject order currency into context so ComputingPrecision resolves correctly.
+        $context = Context::getContext();
+        if (!$context->currency || !Validate::isLoadedObject($context->currency)) {
+            $context->currency = new Currency((int) $order->id_currency);
+        }
+        if (!$context->language || !Validate::isLoadedObject($context->language)) {
+            $context->language = new Language((int) Configuration::get('PS_LANG_DEFAULT'));
+        }
+
         $history = new OrderHistory();
         $history->id_order = (int) $order->id;
         $history->changeIdOrderState($stateId, $order, true);
-        $history->addWithemail(true);
+        try {
+            $history->addWithemail(true);
+        } catch (\Throwable $e) {
+            // Final fallback — skips email but persists state and invoice.
+            $history->add();
+        }
 
         if (!empty($comment)) {
             $msg = new Message();

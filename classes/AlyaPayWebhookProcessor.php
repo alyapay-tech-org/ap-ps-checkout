@@ -45,10 +45,21 @@ class AlyaPayWebhookProcessor
                 return true;
             }
 
-            $order = $this->resolveOrder($webhookData);
-            if (!$order) {
+            $cartId = (int) ($webhookData['vendorReference'] ?? 0);
+            if ($cartId <= 0) {
                 PrestaShopLogger::addLog(
-                    'AlyaPay webhook: order not found for vendor ref ' . ($webhookData['vendorReference'] ?? 'null'),
+                    'AlyaPay webhook: missing or invalid vendorReference (cart ID) in payload',
+                    2,
+                    null,
+                    'AlyaPay'
+                );
+                return true;
+            }
+
+            $orders = $this->orderHelper->getOrdersByCartId($cartId);
+            if (empty($orders)) {
+                PrestaShopLogger::addLog(
+                    'AlyaPay webhook: no orders found for cart ' . $cartId,
                     2,
                     null,
                     'AlyaPay'
@@ -59,42 +70,46 @@ class AlyaPayWebhookProcessor
             $transactionId = (string) ($webhookData['id'] ?? '');
 
             if ($event === self::EVENT_APPROVED) {
-                $currentState = (int) $order->getCurrentState();
-                if ($currentState === (int) Configuration::get('PS_OS_CANCELED')) {
-                    return true;
-                }
-                $payments = OrderPayment::getByOrderReference($order->reference);
-                if (!empty($payments)) {
+                $targetStatus = $this->config->getApprovedStatus();
+
+                foreach ($orders as $order) {
+                    if ($order->getCurrentState() === (int) Configuration::get('PS_OS_CANCELED')) {
+                        continue;
+                    }
+                    // Skip if already processed (idempotency)
+                    $payments = OrderPayment::getByOrderReference($order->reference);
+                    $alreadyProcessed = false;
                     foreach ($payments as $p) {
                         if (!empty($p->transaction_id) && $p->transaction_id === $transactionId) {
-                            return true;
+                            $alreadyProcessed = true;
+                            break;
                         }
                     }
-                }
+                    if ($alreadyProcessed) {
+                        continue;
+                    }
 
-                $targetStatus = $this->config->getApprovedStatus();
-                $this->orderHelper->approveOrder($order, $transactionId, $targetStatus);
+                    try {
+                        $this->orderHelper->approveOrder($order, $transactionId, $targetStatus);
+                        PrestaShopLogger::addLog(
+                            sprintf('AlyaPay webhook: approved order %s (cart %d)', $order->reference, $cartId),
+                            1,
+                            null,
+                            'AlyaPay'
+                        );
+                    } catch (\Throwable $e) {
+                        PrestaShopLogger::addLog(
+                            sprintf('AlyaPay webhook: error approving order %s: %s', $order->reference, $e->getMessage()),
+                            3,
+                            null,
+                            'AlyaPay'
+                        );
+                    }
+                }
             } else {
-                $currentState = (int) $order->getCurrentState();
-                if ($currentState === (int) Configuration::get('PS_OS_CANCELED')) {
-                    return true;
-                }
-
-                // Customer switched payment method — webhook belongs to abandoned AlyaPay attempt, ignore it.
-                if ($order->module !== 'alyapay') {
-                    PrestaShopLogger::addLog(
-                        sprintf(
-                            'AlyaPay webhook: ignoring %s for order %s — payment method changed to %s',
-                            $event,
-                            $order->reference,
-                            $order->module
-                        ),
-                        1,
-                        null,
-                        'AlyaPay'
-                    );
-                    return true;
-                }
+                $comment = $event === self::EVENT_EXPIRED
+                    ? sprintf('AlyaPay: Transaction expired (webhook). Transaction ID: %s', $transactionId)
+                    : sprintf('AlyaPay: Payment cancelled (webhook). Transaction ID: %s', $transactionId);
 
                 if ($event === self::EVENT_EXPIRED) {
                     $targetStatus = $this->config->getExpiredStatus();
@@ -102,19 +117,44 @@ class AlyaPayWebhookProcessor
                     $targetStatus = $this->config->getCanceledStatus();
                 }
 
-                $comment = $event === self::EVENT_EXPIRED
-                    ? sprintf('AlyaPay: Transaction expired (webhook). Transaction ID: %s', $transactionId)
-                    : sprintf('AlyaPay: Payment cancelled (webhook). Transaction ID: %s', $transactionId);
+                foreach ($orders as $order) {
+                    if ($order->getCurrentState() === (int) Configuration::get('PS_OS_CANCELED')) {
+                        continue;
+                    }
+                    // Customer switched payment method — webhook belongs to abandoned AlyaPay attempt.
+                    if ($order->module !== 'alyapay') {
+                        PrestaShopLogger::addLog(
+                            sprintf(
+                                'AlyaPay webhook: ignoring %s for order %s — payment method changed to %s',
+                                $event,
+                                $order->reference,
+                                $order->module
+                            ),
+                            1,
+                            null,
+                            'AlyaPay'
+                        );
+                        continue;
+                    }
 
-                $this->orderHelper->setOrderState($order, $targetStatus, $comment);
+                    try {
+                        $this->orderHelper->setOrderState($order, $targetStatus, $comment);
+                        PrestaShopLogger::addLog(
+                            sprintf('AlyaPay webhook: applied %s to order %s (cart %d)', $event, $order->reference, $cartId),
+                            1,
+                            null,
+                            'AlyaPay'
+                        );
+                    } catch (\Throwable $e) {
+                        PrestaShopLogger::addLog(
+                            sprintf('AlyaPay webhook: error applying %s to order %s: %s', $event, $order->reference, $e->getMessage()),
+                            3,
+                            null,
+                            'AlyaPay'
+                        );
+                    }
+                }
             }
-
-            PrestaShopLogger::addLog(
-                sprintf('AlyaPay webhook: order %s updated (event: %s)', $order->reference, $event),
-                1,
-                null,
-                'AlyaPay'
-            );
 
             return true;
         } catch (\Throwable $e) {
@@ -128,12 +168,4 @@ class AlyaPayWebhookProcessor
         }
     }
 
-    private function resolveOrder(array $data): ?Order
-    {
-        $vendorRef = $data['vendorReference'] ?? $data['orderReference'] ?? null;
-        if ($vendorRef !== null && $vendorRef !== '') {
-            return $this->orderHelper->getOrderByReference((string) $vendorRef);
-        }
-        return null;
-    }
 }

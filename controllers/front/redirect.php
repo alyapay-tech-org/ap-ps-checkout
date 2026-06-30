@@ -70,7 +70,7 @@ class AlyaPayRedirectModuleFrontController extends ModuleFrontController
         try {
             $client = new AlyaPayApiClient($config);
             $sessionService = new AlyaPaySessionIntentService($client);
-            $response = $sessionService->createSessionIntent($order);
+            $response = $sessionService->createSessionIntent($cart);
 
             $checkoutUrl = $response['checkout_url'] ?? null;
             $checkoutToken = $response['checkout_token'] ?? null;

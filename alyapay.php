@@ -527,6 +527,7 @@ class AlyaPay extends PaymentModule
         $option = new \PrestaShop\PrestaShop\Core\Payment\PaymentOption();
         $option->setModuleName($this->name)
             ->setCallToActionText($title)
+            ->setLogo('https://cdn.alyapay.com/alya-logo.svg')
             ->setAction($this->context->link->getModuleLink($this->name, 'redirect', [], true));
 
         if ($isBelowMin) {
@@ -587,7 +588,9 @@ class AlyaPay extends PaymentModule
 
         $installments = [];
         $installmentCount = 4;
-        $installmentAmt = number_format((float) $order->total_paid / $installmentCount, 2, ',', ' ') . ' ' . $currencyCode;
+        $orderTotal = 0.0;
+        $installmentAmt = '';
+        $vendorReference = $order->reference;
 
         $payments = OrderPayment::getByOrderReference($order->reference);
         $transactionId = null;
@@ -606,6 +609,10 @@ class AlyaPay extends PaymentModule
                 $scheduleService = new AlyaPayScheduleService($client);
                 $schedules = $scheduleService->getSchedules($transactionId);
 
+                if (!empty($schedules['vendorReference'])) {
+                    $vendorReference = $schedules['vendorReference'];
+                }
+
                 if (!empty($schedules['installments'])) {
                     $raw = $schedules['installments'];
                     usort($raw, function ($a, $b) {
@@ -618,7 +625,10 @@ class AlyaPay extends PaymentModule
                     });
 
                     $installmentCount = count($raw);
+                    $rawTotal = 0.0;
                     foreach ($raw as $idx => $row) {
+                        $rawTotal += (float) ($row['amount'] ?? 0);
+
                         $status = strtoupper($row['status'] ?? 'SCHEDULED');
                         $statusKey = 'scheduled';
                         if ($status === 'PAID' || $status === 'COMPLETED') {
@@ -645,6 +655,10 @@ class AlyaPay extends PaymentModule
                             'status' => $statusKey,
                         ];
                     }
+
+                    // Prefer API total field; fall back to sum of installments.
+                    $orderTotal = !empty($schedules['total']) ? (float) $schedules['total'] : $rawTotal;
+
                     if (!empty($installments)) {
                         $installmentAmt = $installments[0]['amount'];
                     }
@@ -665,9 +679,9 @@ class AlyaPay extends PaymentModule
         $t = $this->getSuccessTranslations($lang, $installmentCount, $installmentAmt);
 
         $this->context->smarty->assign([
-            'alyapay_order_id' => $order->reference,
+            'alyapay_order_id' => $vendorReference,
             'alyapay_order_date' => date('d/m/Y', strtotime($order->date_add)),
-            'alyapay_order_total' => number_format((float) $order->total_paid, 2, ',', ' ') . ' ' . $currencyCode,
+            'alyapay_order_total' => number_format($orderTotal, 2, ',', ' ') . ' ' . $currencyCode,
             'alyapay_installment_count' => $installmentCount,
             'alyapay_installment_amount' => $installmentAmt,
             'alyapay_installments' => $installments,
@@ -847,24 +861,36 @@ class AlyaPay extends PaymentModule
             return;
         }
 
+        // Always register JS/CSS on checkout page for logo positioning.
+        $isCheckout = ($this->context->controller instanceof OrderController
+            || (isset($this->context->controller->php_self) && $this->context->controller->php_self === 'order'));
+
         $anyWidget = $config->isWidgetEnabled()
             || $config->isCreditPromoProductEnabled()
             || $config->isCreditPromoCartEnabled();
 
-        if (!$anyWidget) {
+        if (!$anyWidget && !$isCheckout) {
             return;
         }
 
-        $this->context->controller->registerJavascript(
-            'alyapay-placement-cdn',
-            'https://cdn.alyapay.com/js/alya-placement.js',
-            ['server' => 'remote', 'position' => 'head', 'priority' => 150, 'attributes' => 'defer']
-        );
+        if ($anyWidget) {
+            $this->context->controller->registerJavascript(
+                'alyapay-placement-cdn',
+                'https://cdn.alyapay.com/js/alya-placement.js',
+                ['server' => 'remote', 'position' => 'head', 'priority' => 150, 'attributes' => 'defer']
+            );
+        }
 
         $this->context->controller->registerJavascript(
             'alyapay-placement-local',
             'modules/' . $this->name . '/views/js/alyapay-placement.js',
             ['position' => 'bottom', 'priority' => 200]
+        );
+
+        $this->context->controller->registerStylesheet(
+            'alyapay-styles',
+            'modules/' . $this->name . '/views/css/alyapay.css',
+            ['position' => 'head', 'priority' => 150]
         );
 
         $this->applyCspWhitelist();

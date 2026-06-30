@@ -5,3 +5,22 @@
 .alyapay-checkout-widget {
     margin: 8px 0;
 }
+
+img[src*="cdn.alyapay.com/alya-logo.svg"] {
+    height: 18px;
+    width: auto;
+    margin-right: 8px;
+}
+
+label:has(img[src*="cdn.alyapay.com/alya-logo.svg"]),
+.payment-option:has(img[src*="cdn.alyapay.com/alya-logo.svg"]) label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-direction: row;
+}
+
+label:has(img[src*="cdn.alyapay.com/alya-logo.svg"]) img,
+.payment-option:has(img[src*="cdn.alyapay.com/alya-logo.svg"]) label img {
+    order: -1;
+}
