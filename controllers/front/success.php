@@ -74,7 +74,7 @@ class AlyaPaySuccessModuleFrontController extends ModuleFrontController
         }
 
         // 5. Order still pending -- webhook hasn't arrived yet.
-        //    Fall back to API status check.
+        //    Fall back to API status check and update ALL orders for this cart (multivendor support).
         if ($transactionId) {
             try {
                 $client = new AlyaPayApiClient($config);
@@ -84,7 +84,20 @@ class AlyaPaySuccessModuleFrontController extends ModuleFrontController
 
                 if (in_array($apiStatus, self::APPROVED_STATUSES)) {
                     $targetStatus = $config->getApprovedStatus();
-                    $orderHelper->approveOrder($order, $transactionId, $targetStatus);
+                    $allOrders = $orderHelper->getOrdersByCartId((int) $order->id_cart);
+                    if (empty($allOrders)) {
+                        $allOrders = [$order];
+                    }
+                    foreach ($allOrders as $o) {
+                        try {
+                            $orderHelper->approveOrder($o, $transactionId, $targetStatus);
+                        } catch (\Throwable $e) {
+                            PrestaShopLogger::addLog(
+                                'AlyaPay: API fallback approve failed for order ' . $o->reference . ': ' . $e->getMessage(),
+                                3, null, 'AlyaPay'
+                            );
+                        }
+                    }
                     $this->redirectToConfirmation($order);
                     return;
                 }
@@ -94,22 +107,33 @@ class AlyaPaySuccessModuleFrontController extends ModuleFrontController
                         $this->module->l('Payment was not successful (status: %s).'),
                         $apiStatus
                     );
-                    $orderHelper->cancelOrder($order, 'Payment failed (API fallback): ' . $apiStatus);
+                    $allOrders = $orderHelper->getOrdersByCartId((int) $order->id_cart);
+                    if (empty($allOrders)) {
+                        $allOrders = [$order];
+                    }
+                    foreach ($allOrders as $o) {
+                        try {
+                            $orderHelper->cancelOrder($o, 'Payment failed (API fallback): ' . $apiStatus);
+                        } catch (\Throwable $e) {
+                            PrestaShopLogger::addLog(
+                                'AlyaPay: API fallback cancel failed for order ' . $o->reference . ': ' . $e->getMessage(),
+                                3, null, 'AlyaPay'
+                            );
+                        }
+                    }
                     $orderHelper->restoreCart((int) $order->id_cart);
                     $this->redirectWithNotifications($this->context->link->getPageLink('order'));
                     return;
                 }
 
-                // Still processing (PENDING etc.) -- show confirmation, webhook will finalize
+                // Still processing (PENDING etc.) -- webhook will finalize all orders
                 $this->redirectToConfirmation($order);
                 return;
             } catch (\Throwable $e) {
-                // API fallback failed -- don't cancel, leave order pending for webhook
+                // API fallback failed -- don't cancel, leave orders pending for webhook
                 PrestaShopLogger::addLog(
                     'AlyaPay: API status fallback failed, relying on webhook: ' . $e->getMessage(),
-                    2,
-                    null,
-                    'AlyaPay'
+                    2, null, 'AlyaPay'
                 );
                 $this->redirectToConfirmation($order);
                 return;

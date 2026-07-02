@@ -53,6 +53,7 @@ class AlyaPay extends PaymentModule
             'displayPaymentReturn',
             'displayProductAdditionalInfo',
             'displayShoppingCartFooter',
+            'displayExpressCheckout',
             'actionAdminControllerSetMedia',
             'actionFrontControllerSetMedia',
         ];
@@ -847,6 +848,60 @@ class AlyaPay extends PaymentModule
             'alyapay_padding_y' => $config->getCartWidgetPaddingY(),
             'alyapay_min_amount' => $minAmount,
             'alyapay_min_display' => $minDisplay,
+        ]);
+
+        return $this->context->smarty->fetch('module:alyapay/views/templates/front/cart_promo.tpl');
+    }
+
+    // ─── Express checkout widget ───────────────────────────────────────
+
+    public function hookDisplayExpressCheckout($params)
+    {
+        if (!$this->active) {
+            return '';
+        }
+
+        $config = new AlyaPayConfig();
+        if (!$config->isActive() || !$config->isCreditPromoCartEnabled()) {
+            return '';
+        }
+
+        $cart = $this->context->cart;
+        if (!$cart || $cart->nbProducts() === 0) {
+            return '';
+        }
+
+        $total = (float) $cart->getOrderTotal();
+
+        if ($config->isAmountAboveMax($total)) {
+            return '';
+        }
+
+        $isBelowMin   = $config->isAmountBelowMin($total);
+        $showBelowMin = $config->isCartWidgetShowBelowMin();
+
+        if ($isBelowMin && !$showBelowMin) {
+            return '';
+        }
+
+        $minAmount  = $isBelowMin && $showBelowMin ? number_format($config->getAmountMin(), 2, '.', '') : '';
+        $minDisplay = $isBelowMin && $showBelowMin ? $config->getCartWidgetMinDisplay() : '';
+
+        $this->context->smarty->assign([
+            'alyapay_price'         => number_format($total, 2, '.', ''),
+            'alyapay_currency'      => $config->getWidgetCurrencyEffective(),
+            'alyapay_lang'          => $config->getWidgetLang(),
+            'alyapay_theme'         => $config->getCartWidgetTheme(),
+            'alyapay_variant'       => $config->getCartWidgetVariant(),
+            'alyapay_detail'        => $config->getCartWidgetDetail(),
+            'alyapay_logo_position' => $config->getCartWidgetLogoPosition(),
+            'alyapay_full_width'    => $config->getCartWidgetFullWidth(),
+            'alyapay_margin_x'      => $config->getCartWidgetMarginX(),
+            'alyapay_margin_y'      => $config->getCartWidgetMarginY(),
+            'alyapay_padding_x'     => $config->getCartWidgetPaddingX(),
+            'alyapay_padding_y'     => $config->getCartWidgetPaddingY(),
+            'alyapay_min_amount'    => $minAmount,
+            'alyapay_min_display'   => $minDisplay,
         ]);
 
         return $this->context->smarty->fetch('module:alyapay/views/templates/front/cart_promo.tpl');
