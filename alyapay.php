@@ -98,6 +98,7 @@ class AlyaPay extends PaymentModule
             'ALYAPAY_PRODUCT_WIDGET_MARGIN_Y' => '',
             'ALYAPAY_PRODUCT_WIDGET_PADDING_X' => '',
             'ALYAPAY_PRODUCT_WIDGET_PADDING_Y' => '',
+            'ALYAPAY_PRODUCT_WIDGET_SHOW_BELOW_MIN' => '0',
             'ALYAPAY_SHOW_DISABLED_BELOW_MIN' => '0',
             'ALYAPAY_DISABLED_TITLE' => '',
             'ALYAPAY_WIDGET_CART_ENABLED' => '0',
@@ -285,6 +286,7 @@ class AlyaPay extends PaymentModule
             'ALYAPAY_PRODUCT_WIDGET_VARIANT' => ['type' => 'select_variant', 'label' => $this->l('Product Widget Variant')],
             'ALYAPAY_PRODUCT_WIDGET_DETAIL' => ['type' => 'select_detail', 'label' => $this->l('Product Widget Detail')],
             'ALYAPAY_PRODUCT_WIDGET_LOGO_POSITION' => ['type' => 'select_logo_pos', 'label' => $this->l('Product Widget Logo Position')],
+            'ALYAPAY_PRODUCT_WIDGET_SHOW_BELOW_MIN' => ['type' => 'switch', 'label' => $this->l('Show Below Minimum')],
             'ALYAPAY_PRODUCT_WIDGET_FULL_WIDTH' => ['type' => 'switch', 'label' => $this->l('Full Width')],
             'ALYAPAY_PRODUCT_WIDGET_MARGIN_X' => ['type' => 'text', 'label' => $this->l('Margin X (px)')],
             'ALYAPAY_PRODUCT_WIDGET_MARGIN_Y' => ['type' => 'text', 'label' => $this->l('Margin Y (px)')],
@@ -443,6 +445,7 @@ class AlyaPay extends PaymentModule
                         ['type' => 'select', 'label' => $this->l('Variant'), 'name' => 'ALYAPAY_PRODUCT_WIDGET_VARIANT', 'options' => ['query' => $variantOptions, 'id' => 'id_option', 'name' => 'name']],
                         ['type' => 'select', 'label' => $this->l('Detail'), 'name' => 'ALYAPAY_PRODUCT_WIDGET_DETAIL', 'options' => ['query' => $detailOptions, 'id' => 'id_option', 'name' => 'name']],
                         ['type' => 'select', 'label' => $this->l('Logo Position'), 'name' => 'ALYAPAY_PRODUCT_WIDGET_LOGO_POSITION', 'options' => ['query' => $logoPosOptions, 'id' => 'id_option', 'name' => 'name']],
+                        ['type' => 'switch', 'label' => $this->l('Show Below Minimum'), 'name' => 'ALYAPAY_PRODUCT_WIDGET_SHOW_BELOW_MIN', 'values' => $switchValues, 'desc' => $this->l('Show widget with min-amount indicator when product price is below the minimum amount.')],
                         ['type' => 'switch', 'label' => $this->l('Full Width'), 'name' => 'ALYAPAY_PRODUCT_WIDGET_FULL_WIDTH', 'values' => $switchValues, 'desc' => $this->l('Stretch widget to full container width.')],
                         ['type' => 'text', 'label' => $this->l('Margin X (px)'), 'name' => 'ALYAPAY_PRODUCT_WIDGET_MARGIN_X', 'size' => 6, 'placeholder' => '0', 'desc' => $this->l('Left and right margin. Default: 0.')],
                         ['type' => 'text', 'label' => $this->l('Margin Y (px)'), 'name' => 'ALYAPAY_PRODUCT_WIDGET_MARGIN_Y', 'size' => 6, 'placeholder' => '0', 'desc' => $this->l('Top and bottom margin. Default: 0.')],
@@ -781,19 +784,29 @@ class AlyaPay extends PaymentModule
             return '';
         }
 
+        $isBelowMin     = $config->isAmountBelowMin($price);
+        $showBelowMin   = $config->isProductWidgetShowBelowMin();
+
+        if ($isBelowMin && !$showBelowMin) {
+            return '';
+        }
+
+        $minAmount = $isBelowMin && $showBelowMin ? number_format($config->getAmountMin(), 2, '.', '') : '';
+
         $this->context->smarty->assign([
-            'alyapay_price' => number_format($price, 2, '.', ''),
-            'alyapay_currency' => $config->getWidgetCurrencyEffective(),
-            'alyapay_lang' => $config->getWidgetLang(),
-            'alyapay_theme' => $config->getProductWidgetTheme(),
-            'alyapay_variant' => $config->getProductWidgetVariant(),
-            'alyapay_detail' => $config->getProductWidgetDetail(),
+            'alyapay_price'         => number_format($price, 2, '.', ''),
+            'alyapay_currency'      => $config->getWidgetCurrencyEffective(),
+            'alyapay_lang'          => $config->getWidgetLang(),
+            'alyapay_theme'         => $config->getProductWidgetTheme(),
+            'alyapay_variant'       => $config->getProductWidgetVariant(),
+            'alyapay_detail'        => $config->getProductWidgetDetail(),
             'alyapay_logo_position' => $config->getProductWidgetLogoPosition(),
-            'alyapay_full_width' => $config->getProductWidgetFullWidth(),
-            'alyapay_margin_x' => $config->getProductWidgetMarginX(),
-            'alyapay_margin_y' => $config->getProductWidgetMarginY(),
-            'alyapay_padding_x' => $config->getProductWidgetPaddingX(),
-            'alyapay_padding_y' => $config->getProductWidgetPaddingY(),
+            'alyapay_full_width'    => $config->getProductWidgetFullWidth(),
+            'alyapay_margin_x'      => $config->getProductWidgetMarginX(),
+            'alyapay_margin_y'      => $config->getProductWidgetMarginY(),
+            'alyapay_padding_x'     => $config->getProductWidgetPaddingX(),
+            'alyapay_padding_y'     => $config->getProductWidgetPaddingY(),
+            'alyapay_min_amount'    => $minAmount,
         ]);
 
         return $this->context->smarty->fetch('module:alyapay/views/templates/front/product_promo.tpl');

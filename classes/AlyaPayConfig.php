@@ -230,6 +230,10 @@ class AlyaPayConfig
         $v = Configuration::get('ALYAPAY_PRODUCT_WIDGET_PADDING_Y'); return $v !== false ? (string) $v : '';
     }
 
+    public function isProductWidgetShowBelowMin(): bool
+    {
+        return (bool) Configuration::get('ALYAPAY_PRODUCT_WIDGET_SHOW_BELOW_MIN');
+    }
 
     // ─── Cart widget ───────────────────────────────────────────────────
 

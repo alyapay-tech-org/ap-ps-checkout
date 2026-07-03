@@ -14,6 +14,7 @@
                     {if $alyapay_margin_y neq ''}margin-y="{$alyapay_margin_y|escape:'htmlall':'UTF-8'}"{/if}
                     {if $alyapay_padding_x neq ''}padding-x="{$alyapay_padding_x|escape:'htmlall':'UTF-8'}"{/if}
                     {if $alyapay_padding_y neq ''}padding-y="{$alyapay_padding_y|escape:'htmlall':'UTF-8'}"{/if}
+                    {if $alyapay_min_amount neq ''}min-amount="{$alyapay_min_amount|escape:'htmlall':'UTF-8'}"{/if}
     ></alya-placement>
 </div>
 {literal}
