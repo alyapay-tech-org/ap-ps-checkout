@@ -41,17 +41,30 @@ class AlyaPayOrderHelper
         }
 
         $orders = $this->loadOrdersByCartId($cartId);
-        if (!empty($orders)) {
-            return $orders;
-        }
 
-        // Fallback: multivendor split module stores sub-carts in ps_presta_split_order.
-        // id_original_cart = original session cart; each row has its own id_cart (sub-cart).
+        // Check if split table exists once for both lookup directions.
         $splitTableExists = (bool) Db::getInstance()->getValue(
             "SELECT COUNT(*) FROM information_schema.tables
              WHERE table_schema = DATABASE()
              AND table_name = '" . pSQL(_DB_PREFIX_ . 'presta_split_order') . "'"
         );
+
+        if (!empty($orders)) {
+            // cartId may be a sub-cart — check if it has a parent and re-run from parent
+            // so all sibling sub-orders are included.
+            if ($splitTableExists) {
+                $parentCartId = (int) Db::getInstance()->getValue(
+                    'SELECT id_original_cart FROM `' . _DB_PREFIX_ . 'presta_split_order`
+                     WHERE id_cart = ' . (int) $cartId
+                );
+                if ($parentCartId > 0 && $parentCartId !== $cartId) {
+                    return $this->getOrdersByCartId($parentCartId);
+                }
+            }
+            return $orders;
+        }
+
+        // cartId is original cart — find all sub-carts and collect their orders.
         if (!$splitTableExists) {
             return [];
         }
@@ -69,8 +82,7 @@ class AlyaPayOrderHelper
             if ($subCartId <= 0) {
                 continue;
             }
-            $subOrders = $this->loadOrdersByCartId($subCartId);
-            foreach ($subOrders as $order) {
+            foreach ($this->loadOrdersByCartId($subCartId) as $order) {
                 $orders[] = $order;
             }
         }
