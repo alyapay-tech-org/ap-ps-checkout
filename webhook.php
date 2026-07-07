@@ -14,6 +14,7 @@ require_once dirname(__FILE__) . '/classes/AlyaPayConfig.php';
 require_once dirname(__FILE__) . '/classes/AlyaPaySignatureVerifier.php';
 require_once dirname(__FILE__) . '/classes/AlyaPayWebhookProcessor.php';
 require_once dirname(__FILE__) . '/classes/AlyaPayOrderHelper.php';
+require_once dirname(__FILE__) . '/classes/AlyaPayEmailQueue.php';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $payload = file_get_contents('php://input');

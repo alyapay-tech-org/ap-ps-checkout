@@ -18,6 +18,7 @@ require_once __DIR__ . '/classes/AlyaPayPartnerConfigService.php';
 require_once __DIR__ . '/classes/AlyaPayWebhookProcessor.php';
 require_once __DIR__ . '/classes/AlyaPaySignatureVerifier.php';
 require_once __DIR__ . '/classes/AlyaPayOrderHelper.php';
+require_once __DIR__ . '/classes/AlyaPayEmailQueue.php';
 
 class AlyaPay extends PaymentModule
 {
@@ -56,6 +57,7 @@ class AlyaPay extends PaymentModule
             'displayExpressCheckout',
             'actionAdminControllerSetMedia',
             'actionFrontControllerSetMedia',
+            'actionEmailSendBefore',
         ];
 
         foreach ($hooks as $hook) {
@@ -542,6 +544,8 @@ class AlyaPay extends PaymentModule
             return [$option];
         }
 
+        // Checkout widget disabled — uncomment the block below to re-enable.
+        /*
         if ($config->isWidgetEnabled()) {
             $this->context->smarty->assign([
                 'alyapay_price' => number_format($total, 2, '.', ''),
@@ -561,6 +565,7 @@ class AlyaPay extends PaymentModule
                 $this->context->smarty->fetch('module:alyapay/views/templates/front/payment_option.tpl')
             );
         }
+        */
 
         return [$option];
     }
@@ -964,43 +969,38 @@ class AlyaPay extends PaymentModule
         $this->applyCspWhitelist();
     }
 
+    /**
+     * The module never sends its own Content-Security-Policy header: imposing
+     * a site-wide policy from a payment module would block every other
+     * third-party resource (analytics, pixels, other payment SDKs) on shops
+     * that have no CSP of their own. Widgets work fine without any policy.
+     *
+     * The only case that needs attention is a merchant-managed CSP that does
+     * not allow cdn.alyapay.com — detect it and log an actionable warning.
+     * See csp_whitelist.php for the directives merchants must add.
+     */
     private function applyCspWhitelist(): void
     {
         if (headers_sent()) {
             return;
         }
 
-        $sources = require __DIR__ . '/csp_whitelist.php';
-
-        $hasCsp = false;
         foreach (headers_list() as $header) {
-            if (stripos($header, 'Content-Security-Policy') !== false) {
-                $hasCsp = true;
-                break;
+            if (stripos($header, 'Content-Security-Policy') === false) {
+                continue;
             }
-        }
 
-        if ($hasCsp) {
-            PrestaShopLogger::addLog(
-                'AlyaPay: existing CSP header detected. Manually add cdn.alyapay.com to script-src and img-src. See modules/alyapay/csp_whitelist.php.',
-                1,
-                null,
-                'AlyaPay'
-            );
+            if (stripos($header, 'cdn.alyapay.com') === false) {
+                PrestaShopLogger::addLog(
+                    'AlyaPay: the shop sends a Content-Security-Policy that does not allow cdn.alyapay.com — the AlyaPay widget will be blocked. Add cdn.alyapay.com to script-src, img-src and connect-src. See modules/alyapay/csp_whitelist.php.',
+                    2,
+                    null,
+                    'AlyaPay'
+                );
+            }
+
             return;
         }
-
-        $scriptSrc = implode(' ', $sources['script-src']);
-        $imgSrc    = implode(' ', $sources['img-src']);
-        $connectSrc = implode(' ', $sources['connect-src']);
-
-        header(
-            "Content-Security-Policy: "
-            . "script-src 'self' 'unsafe-inline' 'unsafe-eval' " . $scriptSrc . "; "
-            . "img-src 'self' data: blob: " . $imgSrc . "; "
-            . "connect-src 'self' " . $connectSrc . ";",
-            false
-        );
     }
 
     // ─── Admin media (optional CSS/JS in BO) ───────────────────────────
@@ -1008,5 +1008,46 @@ class AlyaPay extends PaymentModule
     public function hookActionAdminControllerSetMedia()
     {
         // Reserved for future admin assets
+    }
+
+    // ─── Defer order_conf email until payment approval ─────────────────
+
+    /**
+     * Blocks the order confirmation email for AlyaPay orders that are still
+     * awaiting payment. The email is captured and re-sent by
+     * AlyaPayOrderHelper::approveOrder() once AlyaPay confirms the payment
+     * (webhook or API fallback), or discarded if the payment fails.
+     *
+     * Returning false from this hook cancels the email (PS 1.7.6+).
+     */
+    public function hookActionEmailSendBefore($params)
+    {
+        if (($params['template'] ?? '') !== 'order_conf') {
+            return true;
+        }
+
+        $reference = $params['templateVars']['{order_name}'] ?? null;
+        if (empty($reference)) {
+            return true;
+        }
+
+        $orderHelper = new AlyaPayOrderHelper();
+        $order = $orderHelper->getOrderByReference((string) $reference);
+        if (!$order || $order->module !== $this->name) {
+            return true;
+        }
+
+        $config = new AlyaPayConfig();
+        if ((int) $order->getCurrentState() !== $config->getPendingStatus()) {
+            // Already approved (deferred send) or another state — let it through.
+            return true;
+        }
+
+        if (!AlyaPayEmailQueue::capture($order, $params)) {
+            // Could not queue it — better to send now than to lose it.
+            return true;
+        }
+
+        return false;
     }
 }

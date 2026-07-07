@@ -4,6 +4,22 @@ if (!defined('_PS_VERSION_')) {
     exit;
 }
 
+// Holds order_conf emails deferred until AlyaPay approves the payment.
+Db::getInstance()->execute(
+    'CREATE TABLE IF NOT EXISTS `' . _DB_PREFIX_ . 'alyapay_email_queue` (
+        `id_alyapay_email_queue` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+        `order_reference` VARCHAR(64) NOT NULL,
+        `id_lang` INT UNSIGNED NOT NULL DEFAULT 1,
+        `id_shop` INT UNSIGNED NOT NULL DEFAULT 1,
+        `subject` VARCHAR(255) NOT NULL DEFAULT \'\',
+        `template_vars` LONGTEXT,
+        `recipient` TEXT,
+        `date_add` DATETIME NOT NULL,
+        PRIMARY KEY (`id_alyapay_email_queue`),
+        KEY `order_reference` (`order_reference`)
+    ) ENGINE=' . _MYSQL_ENGINE_ . ' DEFAULT CHARSET=utf8mb4'
+);
+
 $orderStates = [
     'ALYAPAY_PENDING' => [
         'color' => '#4169E1',

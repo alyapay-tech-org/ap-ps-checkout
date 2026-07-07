@@ -139,6 +139,7 @@ class AlyaPayWebhookProcessor
 
                     try {
                         $this->orderHelper->setOrderState($order, $targetStatus, $comment);
+                        AlyaPayEmailQueue::discard($order->reference);
                         PrestaShopLogger::addLog(
                             sprintf('AlyaPay webhook: applied %s to order %s (cart %d)', $event, $order->reference, $cartId),
                             1,

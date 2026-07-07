@@ -132,6 +132,9 @@ class AlyaPayOrderHelper
             sprintf('AlyaPay: Payment approved. Transaction ID: %s', $transactionId)
         );
 
+        // Release the order_conf email that was held back while payment was pending.
+        AlyaPayEmailQueue::flush($order);
+
         return true;
     }
 
@@ -147,7 +150,12 @@ class AlyaPayOrderHelper
         }
 
         $canceledState = (int) Configuration::get('PS_OS_CANCELED');
-        return $this->setOrderState($order, $canceledState, $comment ?: 'AlyaPay: Order cancelled');
+        $result = $this->setOrderState($order, $canceledState, $comment ?: 'AlyaPay: Order cancelled');
+
+        // Payment failed — the held order_conf email must never be sent.
+        AlyaPayEmailQueue::discard($order->reference);
+
+        return $result;
     }
 
     public function setOrderState(Order $order, int $stateId, string $comment = ''): bool
@@ -205,13 +213,10 @@ class AlyaPayOrderHelper
             return;
         }
 
-        $payment = new OrderPayment();
-        $payment->order_reference = $order->reference;
-        $payment->id_currency = $order->id_currency;
-        $payment->amount = $order->total_paid;
-        $payment->payment_method = 'AlyaPay';
-        $payment->transaction_id = $transactionId;
-        $payment->add();
+        // Must go through Order::addOrderPayment() (not a raw OrderPayment::add())
+        // so orders.total_paid_real is updated — the BO customer list "Sales"
+        // column sums total_paid_real of valid orders and would stay at 0 otherwise.
+        $order->addOrderPayment($order->total_paid, 'AlyaPay', $transactionId);
     }
 
     public function restoreCart(int $idCart): ?Cart

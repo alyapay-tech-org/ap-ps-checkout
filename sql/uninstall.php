@@ -4,6 +4,9 @@ if (!defined('_PS_VERSION_')) {
     exit;
 }
 
+// Read before the config keys are deleted below.
+$pendingStateId = (int) Configuration::get('ALYAPAY_PENDING');
+
 $configKeys = [
     'ALYAPAY_ACTIVE',
     'ALYAPAY_TITLE',
@@ -32,3 +35,13 @@ $configKeys = [
 foreach ($configKeys as $key) {
     Configuration::deleteByName($key);
 }
+
+// Remove the module's order state so reinstalling does not create duplicates.
+if ($pendingStateId > 0) {
+    $state = new OrderState($pendingStateId);
+    if (Validate::isLoadedObject($state)) {
+        $state->delete();
+    }
+}
+
+Db::getInstance()->execute('DROP TABLE IF EXISTS `' . _DB_PREFIX_ . 'alyapay_email_queue`');

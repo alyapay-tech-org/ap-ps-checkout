@@ -2,13 +2,13 @@
 /**
  * AlyaPay CSP Whitelist — PS8 equivalent of Magento's csp_whitelist.xml
  *
- * PrestaShop 8 does not ship with frontend CSP headers by default, so this
- * file serves two purposes:
+ * PrestaShop 8 does not ship with frontend CSP headers by default, and this
+ * module NEVER sends a Content-Security-Policy header of its own (doing so
+ * would block other third-party resources on shops without a CSP).
  *
- * 1. Machine-readable declaration of what cdn.alyapay.com needs (used by the
- *    hookActionFrontControllerSetMedia implementation in alyapay.php).
- *
- * 2. Reference for merchants who configure CSP at the server level.
+ * This file is a reference for merchants who configure CSP at the server
+ * level. If your shop sends a CSP header, the AlyaPay widget will be blocked
+ * unless you allow cdn.alyapay.com.
  *    Add these to your Apache / Nginx / CDN CSP header:
  *
  *    script-src  https://cdn.alyapay.com
