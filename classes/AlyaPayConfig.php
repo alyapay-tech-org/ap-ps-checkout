@@ -105,6 +105,31 @@ class AlyaPayConfig
         return $value ? (int) $value : (int) Configuration::get('PS_OS_CHEQUE');
     }
 
+    // ─── Reconciliation cron ───────────────────────────────────────────
+
+    private const RECONCILE_LOCK_NAME = 'alyapay_reconcile';
+
+    /**
+     * Acquires a MySQL named lock for a reconciliation run — atomic (unlike a
+     * Configuration get-then-set flag, which two overlapping runs could both
+     * pass) and auto-released if the connection drops, so a crashed run can't
+     * leave the lock stuck.
+     */
+    public function acquireReconcileLock(): bool
+    {
+        $result = Db::getInstance()->getValue(
+            'SELECT GET_LOCK(\'' . pSQL(self::RECONCILE_LOCK_NAME) . '\', 0)'
+        );
+        return (int) $result === 1;
+    }
+
+    public function releaseReconcileLock(): void
+    {
+        Db::getInstance()->execute(
+            'SELECT RELEASE_LOCK(\'' . pSQL(self::RECONCILE_LOCK_NAME) . '\')'
+        );
+    }
+
     public function isShowDisabledBelowMin(): bool
     {
         return (bool) Configuration::get('ALYAPAY_SHOW_DISABLED_BELOW_MIN');

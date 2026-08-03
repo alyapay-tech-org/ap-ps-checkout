@@ -114,6 +114,37 @@ class AlyaPayOrderHelper
         return $orders;
     }
 
+    /**
+     * Distinct cart IDs with an AlyaPay order still stuck in the pending
+     * status, created more than $minAgeMinutes ago. Feeds the reconciliation
+     * cron — grouped by cart since one AlyaPay transaction covers a whole
+     * cart (multivendor setups may split it into several orders).
+     *
+     * @return int[]
+     */
+    public function getPendingAlyaPayCartIds(int $minAgeMinutes): array
+    {
+        $pendingStatus = (new AlyaPayConfig())->getPendingStatus();
+
+        $sql = new DbQuery();
+        $sql->select('DISTINCT id_cart');
+        $sql->from('orders');
+        $sql->where('current_state = ' . (int) $pendingStatus);
+        $sql->where('module = \'alyapay\'');
+        $sql->where(
+            'date_add <= \'' . pSQL(date('Y-m-d H:i:s', strtotime('-' . (int) $minAgeMinutes . ' minutes'))) . '\''
+        );
+
+        $rows = Db::getInstance()->executeS($sql);
+        if (!$rows) {
+            return [];
+        }
+
+        return array_map(static function (array $row): int {
+            return (int) $row['id_cart'];
+        }, $rows);
+    }
+
     public function approveOrder(Order $order, string $transactionId, int $targetStateId): bool
     {
         if (!Validate::isLoadedObject($order)) {
