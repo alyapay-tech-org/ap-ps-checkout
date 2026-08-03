@@ -45,25 +45,36 @@ class AlyaPayReconcilePendingOrders
     }
 
     /**
-     * Cron entry point.
+     * Entry point — called from the cron/automatic trigger on platforms that
+     * have one, or directly from a manual admin action otherwise (see
+     * docs/platform-parity.md at the repo root).
+     *
+     * @return array{checked: int, reconciled: int} carts examined vs. actually
+     *     resolved (approved or closed) — left_pending/too-young/lookup-failed
+     *     carts count toward "checked" but not "reconciled".
      */
-    public function execute(): void
+    public function execute(): array
     {
+        $summary = ['checked' => 0, 'reconciled' => 0];
+
         if (!$this->config->isActive() || !$this->config->getApiKey()) {
-            return;
+            return $summary;
         }
 
         // Overlap guard — PrestaShop's cron mechanism, unlike Magento's, gives no
         // built-in single-flight guarantee for a job, so it's made explicit here.
         if (!$this->config->acquireReconcileLock()) {
-            return;
+            return $summary;
         }
 
         try {
             $cartIds = $this->orderHelper->getPendingAlyaPayCartIds(self::MIN_AGE_MINUTES);
+            $summary['checked'] = count($cartIds);
             foreach ($cartIds as $cartId) {
                 try {
-                    $this->reconcileCart($cartId);
+                    if ($this->reconcileCart($cartId)) {
+                        $summary['reconciled']++;
+                    }
                 } catch (Throwable $e) {
                     $this->logError(sprintf(
                         'AlyaPay cron: unexpected error reconciling cart %d: %s',
@@ -75,34 +86,36 @@ class AlyaPayReconcilePendingOrders
         } finally {
             $this->config->releaseReconcileLock();
         }
+
+        return $summary;
     }
 
-    private function reconcileCart(int $cartId): void
+    private function reconcileCart(int $cartId): bool
     {
         $orders = $this->orderHelper->getOrdersByCartId($cartId);
         if (empty($orders)) {
-            return;
+            return false;
         }
 
         $anchor = $this->earliestCreationTime($orders);
         $expiryMinutes = $this->config->getTransactionExpiry();
         $thresholdMinutes = $expiryMinutes > 0 ? $expiryMinutes + self::GRACE_MINUTES : self::MIN_AGE_MINUTES;
         if ($anchor === false || (time() - $anchor) < ($thresholdMinutes * 60)) {
-            return;
+            return false;
         }
 
         try {
             $response = $this->vendorTransactionService->getByVendorReference((string) $cartId);
         } catch (Throwable $e) {
             $this->logError(sprintf('AlyaPay cron: vendor lookup failed for cart %d: %s', $cartId, $e->getMessage()));
-            return;
+            return false;
         }
 
         $status = strtoupper((string) ($response['status'] ?? ''));
         $transactionId = (string) ($response['id'] ?? '');
 
         if ($status === '') {
-            return;
+            return false;
         }
 
         if (in_array($status, self::APPROVED_STATUSES, true)) {
@@ -110,7 +123,7 @@ class AlyaPayReconcilePendingOrders
             $this->closeOrders($orders, function ($order) use ($transactionId, $targetStatus): void {
                 $this->orderHelper->approveOrder($order, $transactionId, $targetStatus);
             }, 'approve');
-            return;
+            return true;
         }
 
         if (in_array($status, self::FAILED_STATUSES, true)) {
@@ -126,10 +139,11 @@ class AlyaPayReconcilePendingOrders
                 $this->orderHelper->setOrderState($order, $targetStatus, $comment);
                 AlyaPayEmailQueue::discard($order->reference);
             }, 'close');
-            return;
+            return true;
         }
 
         // PENDING/PROCESSING — transaction still in progress on AlyaPay's side, leave orders as-is.
+        return false;
     }
 
     /**

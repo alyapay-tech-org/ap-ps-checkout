@@ -19,6 +19,8 @@ require_once __DIR__ . '/classes/AlyaPayWebhookProcessor.php';
 require_once __DIR__ . '/classes/AlyaPaySignatureVerifier.php';
 require_once __DIR__ . '/classes/AlyaPayOrderHelper.php';
 require_once __DIR__ . '/classes/AlyaPayEmailQueue.php';
+require_once __DIR__ . '/classes/AlyaPayVendorTransactionService.php';
+require_once __DIR__ . '/classes/AlyaPayReconcilePendingOrders.php';
 
 class AlyaPay extends PaymentModule
 {
@@ -138,13 +140,70 @@ class AlyaPay extends PaymentModule
     {
         $output = '';
 
-        if (Tools::isSubmit('submitAlyaPayConfig')) {
+        if (Tools::isSubmit('submitAlyaPayReconcile')) {
+            $output .= $this->handleReconcileAction();
+        } elseif (Tools::isSubmit('submitAlyaPayConfig')) {
             $output .= $this->postProcess();
         } else {
             $this->fetchAndSyncPartnerConfig();
         }
 
-        return $output . $this->renderForm();
+        return $output . $this->renderReconcileButton() . $this->renderForm();
+    }
+
+    /**
+     * Manual trigger for AlyaPayReconcilePendingOrders — this platform has no
+     * native background cron (verified against a real PrestaShop 8.2.5
+     * install: no actionCronJob hook, no CronTask class exist), and the
+     * automatic alternatives either push server config onto the merchant or
+     * risk blocking a customer's page load on a slow outbound API call. See
+     * docs/platform-parity.md at the repo root for the full rationale.
+     */
+    private function handleReconcileAction(): string
+    {
+        try {
+            $config = new AlyaPayConfig();
+            $job = new AlyaPayReconcilePendingOrders(
+                new AlyaPayOrderHelper(),
+                new AlyaPayVendorTransactionService(new AlyaPayApiClient($config)),
+                $config
+            );
+
+            $summary = $job->execute();
+
+            return $this->displayConfirmation(sprintf(
+                $this->l('Reconciliation run complete: %d order(s) checked, %d resolved.'),
+                $summary['checked'],
+                $summary['reconciled']
+            ));
+        } catch (\Throwable $e) {
+            PrestaShopLogger::addLog(
+                'AlyaPay: manual reconciliation failed: ' . $e->getMessage(),
+                3,
+                null,
+                'AlyaPay'
+            );
+            return $this->displayWarning($this->l('Reconciliation could not run. Check the AlyaPay logs for details.'));
+        }
+    }
+
+    private function renderReconcileButton(): string
+    {
+        $actionUrl = AdminController::$currentIndex
+            . '&configure=' . $this->name
+            . '&token=' . Tools::getAdminTokenLite('AdminModules');
+
+        return '<div class="panel">'
+            . '<div class="panel-heading"><i class="icon-refresh"></i> ' . $this->l('Reconciliation') . '</div>'
+            . '<p style="padding:0 20px;">'
+            . $this->l('Manually check AlyaPay for orders stuck pending (e.g. a blocked webhook) and resolve them now.')
+            . '</p>'
+            . '<form action="' . htmlspecialchars($actionUrl) . '" method="post" style="padding:0 20px 20px;">'
+            . '<button type="submit" name="submitAlyaPayReconcile" class="btn btn-default">'
+            . '<i class="icon-refresh"></i> ' . $this->l('Reconcile pending AlyaPay orders now')
+            . '</button>'
+            . '</form>'
+            . '</div>';
     }
 
     private function fetchAndSyncPartnerConfig(): void

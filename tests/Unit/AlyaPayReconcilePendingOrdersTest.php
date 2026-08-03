@@ -104,7 +104,9 @@ class AlyaPayReconcilePendingOrdersTest extends TestCase
             ->method('approveOrder')
             ->with($this->isInstanceOf(Order::class), 'txn-42', 2);
 
-        $this->job->execute();
+        $result = $this->job->execute();
+
+        $this->assertSame(['checked' => 1, 'reconciled' => 1], $result);
     }
 
     public function testSkipsOrdersWhosePaymentMethodChanged(): void
@@ -152,7 +154,9 @@ class AlyaPayReconcilePendingOrdersTest extends TestCase
         $this->orderHelper->expects($this->never())->method('approveOrder');
         $this->orderHelper->expects($this->never())->method('setOrderState');
 
-        $this->job->execute();
+        $result = $this->job->execute();
+
+        $this->assertSame(['checked' => 1, 'reconciled' => 0], $result);
     }
 
     public function testClosesOrdersWhenTransactionCanceled(): void
@@ -239,6 +243,20 @@ class AlyaPayReconcilePendingOrdersTest extends TestCase
         $this->orderHelper->expects($this->once())->method('approveOrder');
         $this->config->expects($this->once())->method('releaseReconcileLock');
 
-        $this->job->execute();
+        $result = $this->job->execute();
+
+        // The failing cart (7) still counts as "checked" but not "reconciled".
+        $this->assertSame(['checked' => 2, 'reconciled' => 1], $result);
+    }
+
+    public function testReportsZeroSummaryWhenSkippedEntirely(): void
+    {
+        $this->config = $this->createMock(AlyaPayConfig::class);
+        $this->config->method('isActive')->willReturn(false);
+
+        $job = new AlyaPayReconcilePendingOrders($this->orderHelper, $this->vendorTransactionService, $this->config);
+        $result = $job->execute();
+
+        $this->assertSame(['checked' => 0, 'reconciled' => 0], $result);
     }
 }
