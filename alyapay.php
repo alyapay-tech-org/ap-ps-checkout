@@ -603,8 +603,6 @@ class AlyaPay extends PaymentModule
             return [$option];
         }
 
-        // Checkout widget disabled — uncomment the block below to re-enable.
-        /*
         if ($config->isWidgetEnabled()) {
             $this->context->smarty->assign([
                 'alyapay_price' => number_format($total, 2, '.', ''),
@@ -624,7 +622,6 @@ class AlyaPay extends PaymentModule
                 $this->context->smarty->fetch('module:alyapay/views/templates/front/payment_option.tpl')
             );
         }
-        */
 
         return [$option];
     }
